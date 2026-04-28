@@ -2,9 +2,9 @@
   "$schema": "https://railpack.io/railpack.schema.json",
   "build": {
     "preInstall": [
-      "apt-get update && apt-get install -y libicu-dev",
-      "docker-php-ext-install intl",
-      "docker-php-ext-enable intl"
+      "apt-get update && apt-get install -y libicu-dev libpq-dev",
+      "docker-php-ext-install intl pdo pdo_pgsql pgsql",
+      "docker-php-ext-enable intl pdo_pgsql"
     ]
   }
 }
