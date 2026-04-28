@@ -1,65 +1,55 @@
 FROM php:8.2-apache
 
-# Install dependencies (tambah libonig-dev untuk mbstring)
+# Install dependency system + extension PHP yang dibutuhkan CI4
 RUN apt-get update && apt-get install -y \
     libicu-dev \
     libpq-dev \
-    libpng-dev \
-    libxml2-dev \
     libonig-dev \
-    curl \
-    git \
+    libzip-dev \
     unzip \
-    && docker-php-ext-install \
-    intl \
-    pdo \
-    pdo_pgsql \
-    pgsql \
-    mbstring \
-    xml \
-    gd \
-    && docker-php-ext-enable intl pdo_pgsql
+    git \
+    curl \
+    && docker-php-ext-install intl mbstring pdo pdo_pgsql pgsql \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install Composer
-RUN curl -sS https://getcomposer.org/installer | php -- \
-    --install-dir=/usr/local/bin \
-    --filename=composer
+# Composer
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
-# Set working directory
+# Apache modules
+RUN a2enmod rewrite \
+    && a2dismod mpm_event || true \
+    && a2dismod mpm_worker || true \
+    && a2enmod mpm_prefork
+
+# Workdir
 WORKDIR /var/www/html
 
 # Copy project
 COPY . .
 
-# Install PHP dependencies
+# Install dependency PHP
 RUN composer install --no-dev --optimize-autoloader
 
-# Apache config dengan dynamic PORT dari Railway
-RUN echo '<VirtualHost *:${PORT}>\n\
-    DocumentRoot /var/www/html/public\n\
-    <Directory /var/www/html/public>\n\
-        AllowOverride All\n\
-        Require all granted\n\
-        Options -Indexes\n\
-    </Directory>\n\
-    ErrorLog ${APACHE_LOG_DIR}/error.log\n\
-    CustomLog ${APACHE_LOG_DIR}/access.log combined\n\
-</VirtualHost>' > /etc/apache2/sites-available/000-default.conf
+# Set document root ke folder public CI4
+ENV APACHE_DOCUMENT_ROOT /var/www/html/public
 
-# Enable mod_rewrite
-RUN a2enmod rewrite
+RUN sed -ri -e 's!/var/www/html!/var/www/html/public!g' /etc/apache2/sites-available/000-default.conf \
+    /etc/apache2/apache2.conf \
+    /etc/apache2/conf-available/*.conf
 
-# Script untuk set PORT dinamis dari Railway
-RUN echo '#!/bin/bash\n\
-sed -i "s/\${PORT}/$PORT/g" /etc/apache2/sites-available/000-default.conf\n\
-sed -i "s/Listen 80/Listen $PORT/" /etc/apache2/ports.conf\n\
-apache2-foreground' > /start.sh \
-    && chmod +x /start.sh
+# Permissions
+RUN chown -R www-data:www-data /var/www/html/writable \
+    && chmod -R 775 /var/www/html/writable
 
-# Set permissions
-RUN chown -R www-data:www-data /var/www/html \
-    && chmod -R 755 /var/www/html/writable
+# Script start untuk Railway PORT dinamis
+RUN printf '#!/bin/sh\n\
+set -e\n\
+PORT=${PORT:-8080}\n\
+sed -ri "s/Listen 80/Listen ${PORT}/" /etc/apache2/ports.conf\n\
+sed -ri "s/<VirtualHost \\*:80>/<VirtualHost *:${PORT}>/" /etc/apache2/sites-available/000-default.conf\n\
+apache2-foreground\n' > /usr/local/bin/start-railway.sh \
+    && chmod +x /usr/local/bin/start-railway.sh
 
-EXPOSE ${PORT:-80}
+EXPOSE 8080
 
-CMD ["/start.sh"]
+CMD ["/usr/local/bin/start-railway.sh"]
